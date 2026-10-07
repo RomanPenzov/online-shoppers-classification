@@ -1,0 +1,30 @@
+{
+  "model": "RandomForest",
+  "parameters": {
+    "model__max_depth": null
+  },
+  "selection_metric": "mean CV average_precision",
+  "CV_AP": 0.3831855447224576,
+  "threshold": 0.21663162596825716,
+  "threshold_rule": "maximum train OOF F1; largest threshold on tie",
+  "score_kind": "predict_proba",
+  "versions": {
+    "numpy": "2.5.2",
+    "pandas": "3.0.5",
+    "scikit-learn": "1.9.0",
+    "matplotlib": "3.11.1",
+    "xgboost": "3.4.1",
+    "lightgbm": "4.7.0",
+    "catboost": "1.2.10",
+    "threadpoolctl": "3.6.0",
+    "python": "3.12.14",
+    "platform": "Linux-6.18.44-x86_64-with-glibc2.39"
+  },
+  "raw_sha256": "b3055ee355f59134d851d32641183cb4a8b45def7124d2f50442a042f358e0d9",
+  "split_sha256": "98d0ebd747b8e63e461b8f443bebdc6064015b19ad403c90bf1f15f542e2910f",
+  "oof_repeat_max_abs_diff": 0.0,
+  "refit_repeat_max_abs_diff": 0.0,
+  "real_time_limitation": "CSV has no point-in-time snapshots; availability of retained features is conditional",
+  "prior_test_exposure": "same test was reported in parts I and II",
+  "deterministic_signature": "20ecc423bc6abb6fc75a49f9c5c15bc686e50821d0da508887a957cc3d25abc0"
+}
