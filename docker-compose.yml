@@ -1,0 +1,7 @@
+services:
+  trainer:
+    build: .
+    command: ["train", "--download", "--output", "artifacts/docker_run"]
+    volumes:
+      - ./data:/app/data
+      - ./artifacts:/app/artifacts
