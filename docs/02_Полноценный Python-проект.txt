@@ -1,0 +1,455 @@
+Цель
+Собрать не просто файл main.py, а нормальный Python-проект: с pyproject.toml, виртуальным окружением .venv, структурой src/, тестами, линтером, type checker, Docker, docker-compose, GitHub Actions и бейджами в README.md.
+
+Инструменты
+uv
+Ruff
+ty
+pytest
+Docker
+GitHub Actions
+Итоговая структура
+В конце должен получиться примерно такой проект:
+
+Python
+Copy
+awesome-weather/
+├── .github/
+│   └── workflows/
+│       └── ci.yml
+├── src/
+│   └── awesome_weather/
+│       ├── __init__.py
+│       ├── cli.py
+        ...
+│       └── core.py
+├── tests/
+│   └── test_core.py
+    ...
+│   └── ...
+├── .dockerignore
+├── .gitignore
+├── .python-version
+├── Dockerfile
+├── README.md
+├── docker-compose.yml
+├── pyproject.toml
+└── uv.lock
+Шаг 1. Создание pyproject.toml
+Сначала создай папку проекта и главный конфигурационный файл pyproject.toml. В нём описываются имя проекта, версия Python, зависимости, CLI-команда, build backend, настройки тестов, линтера и type checker.
+
+pyproject.toml
+Минимальный pyproject.toml для приложения с CLI, тестами, Ruff и ty:
+
+Python
+Copy
+[project]
+name = "awesome-weather"
+version = "0.1.0"
+description = "Small example Python project with uv, tests, linting, typing and Docker."
+readme = "README.md" # можно не указывать
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.0",
+]
+
+[project.scripts]
+awesome-weather = "awesome_weather.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.8",
+    "ty>=0.0.1a1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "B",
+    "UP",
+    "SIM",
+]
+
+[tool.ty.environment]
+python-version = "3.12"
+root = ["./src"]
+Замечание
+Если используешь uv init awesome-weather --package, pyproject.toml будет создан автоматически. Но полезно понимать его структуру вручную: именно этот файл является центром проекта.
+
+Шаг 2. Создание .venv через uv
+Теперь привяжи версию Python, создай lock-файл и синхронизируй окружение. uv sync создаст .venv рядом с pyproject.toml и установит обычные и dev-зависимости.
+
+Bash
+Copy
+uv python pin 3.12
+uv lock
+uv sync
+Замечание
+После синхронизации появятся:
+
+.python-version — выбранная версия Python;
+.venv/ — локальное виртуальное окружение;
+uv.lock — зафиксированное дерево зависимостей.
+Команды проекта запускай через uv run, чтобы не активировать окружение вручную.
+
+Bash
+Copy
+uv run python --version
+uv run ruff check .
+uv run ruff format .
+uv run ty check
+uv run pytest
+Шаг 3. Структура src-layout
+src/-layout защищает от случайного импорта кода прямо из корня репозитория. Это ближе к тому, как пакет будет работать после установки.
+
+Bash
+Copy
+mkdir -p src/awesome_weather tests    # создать папки из терминала
+touch src/awesome_weather/__init__.py # создать файл из терминала
+touch src/awesome_weather/core.py     # создать файл из терминала
+touch src/awesome_weather/cli.py      # создать файл из терминала
+touch tests/test_core.py              # создать файл из терминала
+src/awesome_weather/core.py
+Основная бизнес-логика должна лежать отдельно от CLI, API и тестов.
+
+Python
+Copy
+from __future__ import annotations
+
+from pydantic import BaseModel, Field
+
+
+class WeatherReport(BaseModel):
+    city: str = Field(min_length=1)
+    temperature_c: float
+    wind_mps: float = Field(ge=0)
+
+    @property
+    def feels_cold(self) -> bool:
+        return self.temperature_c < 5 or self.wind_mps >= 10
+
+
+def format_report(report: WeatherReport) -> str:
+    status = "cold" if report.feels_cold else "ok"
+    return f"{report.city}: {report.temperature_c:.1f} C, wind {report.wind_mps:.1f} m/s, {status}"
+src/awesome_weather/cli.py
+CLI-слой только парсит аргументы, вызывает бизнес-логику и печатает результат.
+
+Python
+Copy
+from __future__ import annotations
+
+import argparse
+
+from awesome_weather.core import WeatherReport, format_report
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Print a small weather report.")
+    parser.add_argument("--city", required=True)
+    parser.add_argument("--temperature", required=True, type=float)
+    parser.add_argument("--wind", required=True, type=float)
+    return parser
+
+
+def main() -> None:
+    args = build_parser().parse_args()
+    report = WeatherReport(
+        city=args.city,
+        temperature_c=args.temperature,
+        wind_mps=args.wind,
+    )
+    print(format_report(report))
+
+
+if __name__ == "__main__":
+    main()
+Проверка CLI
+После uv sync команда из [project.scripts] должна запускаться через uv run.
+
+Bash
+Copy
+uv run awesome-weather --city Moscow --temperature -3 --wind 4
+Шаг 4. Тесты pytest
+Тесты кладём в tests/. Они должны проверять не только happy path, но и ошибки валидации, граничные случаи и несколько вариантов входных данных.
+
+Python
+Copy
+import pytest
+from pydantic import ValidationError
+
+from awesome_weather.core import WeatherReport, format_report
+
+
+def test_format_report_for_normal_weather() -> None:
+    report = WeatherReport(city="Tbilisi", temperature_c=18.2, wind_mps=2.5)
+
+    assert format_report(report) == "Tbilisi: 18.2 C, wind 2.5 m/s, ok"
+
+
+@pytest.mark.parametrize(
+    ("temperature_c", "wind_mps"),
+    [
+        (0.0, 2.0),
+        (12.0, 11.0),
+    ],
+)
+def test_cold_weather_detection(temperature_c: float, wind_mps: float) -> None:
+    report = WeatherReport(city="Oslo", temperature_c=temperature_c, wind_mps=wind_mps)
+
+    assert report.feels_cold is True
+
+
+def test_city_must_not_be_empty() -> None:
+    with pytest.raises(ValidationError):
+        WeatherReport(city="", temperature_c=10.0, wind_mps=1.0)
+Запуск тестов
+Запускай тесты той же командой локально и в CI.
+
+Bash
+Copy
+uv run pytest
+Шаг 5. Ruff: линтер и форматтер
+Ruff отвечает за линтинг, порядок импортов и форматирование. В pyproject.toml уже есть базовая конфигурация.
+
+Bash
+Copy
+uv run ruff check .
+uv run ruff format .
+Замечание
+В CI лучше проверять форматирование без изменения файлов.
+
+Bash
+Copy
+uv run ruff format --check .
+Типичные правила Ruff
+E, F — базовые ошибки стиля и неиспользуемые импорты;
+I — сортировка импортов;
+B — частые баги из flake8-bugbear;
+UP — обновление синтаксиса под современный Python;
+SIM — упрощение кода.
+Шаг 6. ty: type checker
+ty проверяет типы и быстро ловит несовместимые аргументы, неправильные возвращаемые значения и ошибки в аннотациях.
+
+Bash
+Copy
+uv run ty check
+Пример ошибки типов
+Такой код должен быть подозрительным для type checker: temperature_c ожидает число, а не строку.
+
+Python
+Copy
+from awesome_weather.core import WeatherReport
+
+
+report = WeatherReport(city="Berlin", temperature_c="warm", wind_mps=3.0)
+.gitignore
+В git не должны попадать виртуальные окружения, кеши, coverage-отчёты и сборочные артефакты.
+
+Python
+Copy
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.dockerignore
+В Docker build context не нужно отправлять .git, .venv, кеши и артефакты сборки.
+
+Python
+Copy
+.git
+.github
+.venv
+.pytest_cache
+.ruff_cache
+htmlcov
+dist
+build
+*.egg-info
+__pycache__
+*.pyc
+Шаг 7. Dockerfile
+Dockerfile должен ставить зависимости из uv.lock, копировать код и запускать CLI. Для приложения важны воспроизводимость и отсутствие лишних dev-зависимостей в runtime-образе.
+
+Python
+Copy
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV UV_SYSTEM_PYTHON=1
+
+WORKDIR /app
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+COPY .python-version pyproject.toml uv.lock README.md ./
+COPY src ./src
+
+RUN uv sync --frozen --no-dev
+
+ENTRYPOINT ["uv", "run", "awesome-weather"]
+CMD ["--city", "Moscow", "--temperature", "-3", "--wind", "4"]
+Сборка и запуск Docker
+Проверь, что образ собирается и CLI запускается внутри контейнера.
+
+Bash
+Copy
+docker build -t awesome-weather:local .
+docker run --rm awesome-weather:local --city Kazan --temperature 7 --wind 3
+Шаг 8. docker-compose.yml
+docker-compose удобен, когда сервисов становится больше: API + база данных + кеш + worker. Даже для маленького CLI можно показать стандартный каркас.
+
+Python
+Copy
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["--city", "Moscow", "--temperature", "-3", "--wind", "4"]
+Запуск compose
+Команда ниже пересоберёт образ и запустит сервис.
+
+Bash
+Copy
+docker compose up --build
+docker-compose.yml для будущего FastAPI
+Если позже появится FastAPI-сервис, command обычно заменяют на запуск сервера, а наружу пробрасывают порт.
+
+Python
+Copy
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    command: ["uv", "run", "uvicorn", "awesome_weather.api:app", "--host", "0.0.0.0", "--port", "8000"]
+Шаг 9. GitHub Actions
+CI должен повторять локальные проверки: установка зависимостей, Ruff, форматирование, type checking, тесты и сборка Docker-образа.
+
+Python
+Copy
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Type check
+        run: uv run ty check
+
+      - name: Tests
+        run: uv run pytest
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t awesome-weather:ci .
+README.md с бейджами
+В README.md должны быть бейдж CI, версия Python, используемые инструменты и команды для запуска проекта.
+
+Python
+Copy
+# awesome-weather
+
+[![CI](https://github.com/OWNER/awesome-weather/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/awesome-weather/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
+[![uv](https://img.shields.io/badge/package%20manager-uv-purple.svg)](https://docs.astral.sh/uv/)
+[![Ruff](https://img.shields.io/badge/linter-ruff-red.svg)](https://docs.astral.sh/ruff/)
+
+Small example Python project with uv, pytest, Ruff, ty and Docker.
+
+## Development
+
+```bash
+uv sync
+uv run pytest
+uv run ruff check .
+uv run ruff format .
+uv run ty check
+```
+
+## Run
+
+```bash
+uv run awesome-weather --city Moscow --temperature -3 --wind 4
+```
+
+## Docker
+
+```bash
+docker build -t awesome-weather:local .
+docker run --rm awesome-weather:local --city Kazan --temperature 7 --wind 3
+docker compose up --build
+```
+Замечание
+Не забудь заменить OWNER на имя пользователя или организации GitHub.
+
+Финальный чеклист
+Перед тем как считать проект собранным, проверь:
+
+uv sync --frozen проходит на чистой машине;
+.venv/ не попадает в git;
+uv.lock лежит в git;
+весь код приложения лежит в src/<package_name>/;
+тесты лежат в tests/;
+uv run pytest проходит;
+uv run ruff check . проходит;
+uv run ruff format --check . проходит;
+uv run ty check проходит;
+Docker-образ собирается;
+docker compose up --build запускает сервис;
+CI повторяет те же проверки, что и локальная разработка;
+в README.md есть команды запуска, тестов и бейдж CI.
+Замечание
+Да, информации много, но именно так или очень похоже выглядит настоящий проект: продуктовый репозиторий, где людям не всё равно на качество и воспроизводимость кода. Бывает и иначе: в репозитории может быть бардак без всего перечисленного выше, но это уже редфлаг
+
+Старайся следовать хотя бы базовому минимуму: uv, pyproject.toml, ruff. Так ты сразу будешь восприниматься как более компетентный инженер. А если умеешь собирать docker-compose и разворачивать сервис, это ещё сильнее повышает уровень проекта.
